@@ -1,8 +1,6 @@
 #!/usr/bin/python
 #-*-coding:utf-8-*-
 
-"""包含主要的业务逻辑,根据已有的数据建立模型以及定义方法判断一条信息是垃圾信息还是正常信息"""
-
 import codecs;
 import os;
 import jieba;
@@ -30,14 +28,13 @@ logging.basicConfig(level=logging.DEBUG,
                     filename=LOG_DIR+PATH_SPLIT+"%s-log.txt"%time.strftime('%d-%H-%M',time.localtime(time.time()))
                     )
 
-#滤掉信息中的无意义的特殊字符
+
 def stripmsg(message):
     newmsg = message;
     for word in comments:
         newmsg = newmsg.replace(word,"");
     return newmsg;
 
-#找出pattern在str中第num次出现的起始下标，num从1开始
 def findn(str,pattern,num):
     i=str.find(pattern);
     l=len(pattern);
@@ -46,10 +43,6 @@ def findn(str,pattern,num):
         num-=1;
     return i;
 
-#从一个原始记录文件中提取弹幕信息正文
-#contidx表示信息的正文在csv记录文件中的列数
-#正常记录文件中信息正文在csv文件的第5列
-#垃圾信息记录文件中信息正文在csv文件的第7列
 def extractmessage(fpath,contidx=5):
     logging.debug((u"从记录文件%s中提取信息"%fpath).encode(CODING));
     output=fpath.replace(DATA_DIR,RECORD_DIR).replace('.csv','.txt');
@@ -69,9 +62,6 @@ def extractmessage(fpath,contidx=5):
     f1.close();
     f2.close();
 
-#对所有的原始记录文件进行提取操作
-#正常记录文件中信息正文在csv文件的第5列
-#垃圾信息记录文件中信息正文在csv文件的第7列
 def extractmsg():    
     for fpath in os.listdir(NORMAL_DATA_DIR):
         fpath=join(NORMAL_DATA_DIR,fpath);
@@ -82,13 +72,11 @@ def extractmsg():
             continue;
         extractmessage(fpath,7,False);
 		
-#对提取出的弹幕信息进行分词，统计其中出现的所有词的词频
 def splitandstat(doclist,isnormal=True):
     #分别记录spam信息和normal信息一共分出词的个数,即所有词的词频的和
     global normaldictsize;
     global spamdictsize;
-    
-    #正常信息和垃圾信息的词频分别记录在不同的字典中,写入不同的对应文件中
+
     if isnormal:
         recdict=normaldict;
         output=codecs.open(join(DICT_DIR,'normaldict.txt'),'w',CODING);
@@ -133,8 +121,6 @@ def splitandstat(doclist,isnormal=True):
         output.write("%s %d\n"%(word,count));
     output.close();
 
-#分类，返回是否是垃圾信息
-#用于测试时可以传入是否是正常信息判断是否分类正确以记录错误日志
 def classify(message,yita=1.31):
     global normaldictsize;
     global spamdictsize;
@@ -246,8 +232,6 @@ def init_without_dict():
     #更新dicts的时间戳，保证data未改变时dicts在ls --sort=time输出中排在data之前
     os.popen('touch dicts');
 
-#检查上一次分词统计后数据是否更新过
-#判断data目录和dict目录哪一个比较新    
 def checkupdate():
     updatelist=os.popen('ls -l --sort=time').read();
     dataidx=updatelist.find('data');
