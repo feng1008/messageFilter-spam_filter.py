@@ -1,0 +1,377 @@
+#!/usr/bin/python
+#-*-coding:utf-8-*-
+
+import codecs;
+import os;
+import jieba;
+import time;
+from os.path import join;
+from config import *;
+import logging;
+import json;
+from numpy import shape;
+from sklearn.feature_extraction.text import TfidfVectorizer,HashingVectorizer;
+from sklearn import svm;
+import pickle;
+
+#记录每一个词在spam和normal中的频数
+# spamdict={}
+# normaldict={}
+
+
+#messageVec用于保存消息的词袋向量，messageLabels用于保存标签，0为normal,1为spam
+messageVec=[];
+messageLabels=[];
+clf=svm.SVC();
+
+# spamVec=[];
+# normalVec=[];
+# messageVec=[];
+# messageLabels=[];
+
+comments=set([u"！", u"（", u"）", u"，", u"。", u"、", u"(", u")", u",", u"!", u"^", u"[", u"]", u"{", u"}",u"-",u"*",u"ヾ",u"＠",u"▽",u"゜",u"ノ"])
+stopwords = [u"的",u"了",u"我",u"你",u"是",u"我们",u"他们",u"她们",u"它",u"他",u"她",u"也",u"还",u"在",u"个",u"啊",u"呀",u"吧",u"苹果",u"安卓",u"果盘"];
+
+vectorizer = HashingVectorizer(stop_words=stopwords,non_negative = True,n_features=100);
+
+logging.basicConfig(level=logging.DEBUG,
+                    format='%(asctime)s %(filename)s[line:%(lineno)d] %(levelname)s %(message)s',
+                    datefmt='%a, %d %b %Y %H:%M:%S',
+                    filename=LOG_DIR+PATH_SPLIT+"%s-log.txt"%time.strftime('%d-%H-%M',time.localtime(time.time()))
+                    )
+
+#滤掉信息中的无意义的特殊字符
+def stripmsg(message):
+    newmsg = message
+    for word in comments:
+        newmsg = newmsg.replace(word,"")
+    return newmsg
+
+#复制文件
+def copyFile(src,des):
+    src_content=codecs.open(src, 'r', CODING).read();
+    des_file=codecs.open(des, 'w', CODING);
+    des_file.write(src_content);
+    des_file.close();
+
+#生成词典，已废弃
+def generateDict(fileList):
+    global wordDict;
+#     global spamMessage;
+#     global normalMessage;
+#     setDict=wordDict;
+    
+    output=codecs.open(join(DICT_DIR,'dict.txt'),'w',CODING);
+    jsonfile=codecs.open(join(DICT_DIR,'dict.json'),'w',CODING);
+    
+    for doc in fileList:
+        logging.debug((u"对记录 %s 中文件分词."%doc).encode(CODING));
+        f=codecs.open(doc,'r',CODING);
+        for eachline in f:
+            eachline=eachline.strip();
+            neachline=stripmsg(eachline);
+            wordlist=list(jieba.cut(neachline,cut_all=False));
+            logging.debug((u"'%s'分词结果:共%d个词项"%(eachline,len(wordlist))).encode(CODING)+":[ " + ",".join(wordlist).encode(CODING)+" ]");
+            
+#             if isnormal:
+#                 normalMessage.append(wordlist);
+#             else:
+#                 spamMessage.append(wordlist);
+            
+            for word in wordlist:
+                if word.strip()=="" or word in stopwords or word in wordDict:
+                    continue;
+                else:
+                    wordDict.add(word);
+        f.close();
+        print "file "+doc+" done!";
+    listWordDict=list(wordDict);
+    json.dump(listWordDict,jsonfile,indent=4);
+    for word in listWordDict:
+        output.write("%s\n"%word);
+    output.close();
+
+#对每条消息生成BOW词袋向量，已废弃
+def generateWordVec(line):
+    global wordDict;
+    
+    listWordDict=list(wordDict);
+    dictSize=len(listWordDict);
+    vec=[0 for i in range(dictSize)];
+    
+    line=line.strip();
+    neachline=stripmsg(line);
+    wordlist=list(jieba.cut(neachline,cut_all=False));
+    for word in wordlist:
+        try:
+            wordIndex=wordDict.index(word);
+            vec[wordIndex]+=1;
+        except:
+#             listWordDict.append(word);
+#             vec.append(1);
+            continue;
+    return vec;
+
+#对文档生成BOW词袋向量，已废弃
+def generateBOWVec(doclist,isnormal=True):
+    global wordDict;
+#     global spamVec;
+#     global normalVec;
+    global messageVec;
+    global messageLabels;
+    
+    spamVec=[];
+    normalVec=[];
+    vec=[];
+    
+    listWordDict=list(wordDict);
+    dictSize=len(listWordDict);
+    
+    for doc in doclist:
+        logging.debug((u"对记录 %s 中文件分词."%doc).encode(CODING));
+        f=codecs.open(doc,'r',CODING);
+        for eachline in f:
+            wordVec=generateWordVec(eachline);
+            vec.append(wordVec);
+#             if isnormal:
+#                 normalVec.append(wordVec);
+#             else:
+#                 spamVec.append(wordVec);
+        print doc+" BOW vector generated!\n";
+#     messageLabels=[0 for i in range(len(normalVec))]+[1 for i in range(len(spamVec))];
+#     messageVec=normalVec.append(spamVec);
+    return vec;
+
+#连接词袋向量，生成标签，已废弃
+def catVec(normalVec,spamVec):
+    messageLabels=[0 for i in range(len(normalVec))]+[1 for i in range(len(spamVec))];
+    messageVec=normalVec;
+    [messageVec.append(x) for x in spamVec];
+    return messageVec,messageLabels;
+
+#对每条消息使用scikit-learn中的HashingVectorizer生成词袋向量
+def skMsgVec(msg):
+    global vectorizer;
+    
+    msgVec=vectorizer.fit_transform(msg);
+    wordVec=msgVec.toarray().tolist();
+    return wordVec;
+
+#保存词向量到文件
+def saveVec(vec,vecName):
+    filename=codecs.open(vecName,'wb',CODING);
+    m,n=shape(vec);
+    for i in range(m):
+        for j in range(n):
+            filename.write(str(vec[i][j]).decode('utf-8')+"\t");
+        filename.write("\n");
+    filename.close();
+
+#从文件读取词向量    
+def readVec(vecName):
+    vec=[];
+    filename=codecs.open(vecName,'rb',CODING);
+    for lines in filename.readlines():
+        vec.append(lines.split());
+    return vec;
+
+#对文档使用scikit-learn中的HashingVectorizer生成词袋向量
+def skBOWVec(fileList):
+    global vectorizer;
+    
+    data=[];
+    for doc in fileList:
+        f=codecs.open(doc,'r',CODING);
+        for eachline in f:
+            eachline=eachline.strip();
+            data.append(eachline);
+    vectorizer = HashingVectorizer(stop_words=stopwords,non_negative = True,n_features=100);
+    #保存HashingVectorizer
+    pickle.dump(clf, open(join(DICT_DIR,'HashingVectorizer.pkl'), 'wb'));
+    
+    train_x=vectorizer.fit_transform(data);
+    wordVec=train_x.toarray().tolist();
+    return wordVec;
+
+#SVM训练，并保存    
+def svmTrain(messageVec,messageLabels):
+    global clf;
+    
+    clf.fit(messageVec, messageLabels);
+    #保存训练好的SVM
+    pickle.dump(clf, open(join(DICT_DIR,'svm.pkl'), 'wb'));
+
+#用SVM进行预测    
+def svmPredict(message):
+    global clf;
+    
+    vectorizer=pickle.load(open('HashingVectorizer.pkl', 'rb'));
+    msgVec=vectorizer.fit_transform(message);
+    msgVec=msgVec.toarray().tolist();
+    return clf.predict(msgVec)[0];
+
+#计算消息条数
+def calLength(fileList):
+    count=0;
+    for doc in fileList:
+        f=codecs.open(doc,'rb',CODING);
+        for lines in f.readlines():
+            count=count+1
+    return count;
+    
+#对一个文件中记录的所有弹幕信息进行分类测试
+def dotest(testfile,normalinfact=True):
+    global errorlog;
+    logging.debug("Testing " + testfile);
+    errorlog.write("Testing %s\n"%testfile);
+    print "Testing " + testfile;
+    total=0;
+    right=0;
+    for eachline in codecs.open(testfile,'r',CODING):
+        eachline = eachline.strip();
+#         if normalinfact==True:
+#             if spamlinedict.has_key(eachline):
+#                 continue
+        total+=1;
+        isspam=svmPredict(eachline)
+        if isspam==1:
+            if normalinfact==False:
+                right+=1;
+            else:
+                errorlog.write(u" spam message \t");
+                errorlog.write(eachline);
+                errorlog.write(u"\n");
+            logging.debug(u"判别为广告内容".encode(CODING));
+        else:
+            if normalinfact==True:
+                right+=1;
+            else:
+                errorlog.write(u"normal messsage \t");
+                errorlog.write(eachline);
+                errorlog.write(u"\n");
+            logging.debug(u"判别为正常内容".encode(CODING));
+    print "Right ratio %d/%d \n"%(right,total)
+    logging.debug("Right ratio %d/%d \n"%(right,total))
+
+#测试
+def test():
+    global errorlog;
+    errorlog=codecs.open(LOG_DIR+PATH_SPLIT+"%s-errlog.txt"%time.strftime('%d-%H-%M'),'w',CODING);
+    logging.debug("***************测试过程**********************");
+   
+    dotest(join(TEST_DIR,"normal.txt"));
+    dotest(join(TEST_DIR,"spam.txt"),False);
+    errorlog.close();
+    
+#对一个文件中记录的所有弹幕信息进行提纯，V1.0版本用到
+def dopurify(testfile,normalinfact=True):
+    spam_output=codecs.open(testfile.replace(TEMP_OLD_NORMAL,TEMP_NEW_SPAM),'w',CODING)
+    normal_output=codecs.open(testfile.replace(TEMP_OLD_NORMAL,TEMP_NEW_NORMAL),'w',CODING)
+    print "purifying " + testfile
+    for eachline in codecs.open(testfile,'r',CODING):
+        eachline = eachline.strip()
+#         if normalinfact==True:
+#             if spamlinedict.has_key(eachline):
+#                 continue
+        #对消息分类，并写入到相应文件中
+        isspam=svmPredict(eachline)
+        if isspam==1:
+            spam_output.write(eachline+"\n")
+        elif isspam==0:
+            normal_output.write(eachline+"\n")
+    normal_output.close()
+    spam_output.close()
+
+#提纯模块，V1.0版本用到
+def purify():
+    global errorlog
+    
+    errorlog=codecs.open(LOG_DIR+PATH_SPLIT+"%s-errlog.txt"%time.strftime('%d-%H-%M'),'w',CODING)
+#     copyfile(join(SPAM_DIR,'spam.txt'),join(SPAM_TEMP,'spam.txt'))
+    logging.debug("***************提纯过程**********************")
+    #提纯文件，文件位于temp/old/normal文件夹下
+    for path in os.listdir(TEMP_OLD_NORMAL):
+        dopurify(join(TEMP_OLD_NORMAL,path))
+    errorlog.close()
+    #拷贝文件
+    for path in os.listdir(TEMP_NEW_NORMAL):
+        copyFile(join(TEMP_NEW_NORMAL,path), join(NORMAL_DIR,path))
+    for path in os.listdir(TEMP_NEW_SPAM):
+        copyFile(join(TEMP_NEW_SPAM,path), join(SPAM_DIR,path))
+
+#如果之前运行过,可以直接读取保存的信息，不用再读取每个文件来统计
+def init_with_dict():
+#     global normaldictsize
+#     global spamdictsize
+
+#     normaldict.update(json.load(codecs.open(join(DICT_DIR,'normaldict.json'),'r',CODING)))
+#     spamdict.update(json.load(codecs.open(join(DICT_DIR,'spamdict.json'),'r',CODING)))
+#     spamlinedict.update(json.load(codecs.open(join(DICT_DIR,'spamlinedict.json'),'r',CODING)))
+    global messageVec,messageLabels,vectorizer,clf;
+    
+    #读取保存的messageVec,messageLabels,clf和vectorizer
+    messageVec=readVec(join(DICT_DIR,'messageVec.txt'));
+    messageLabels=pickle.load(codecs.open(join(DICT_DIR,'messageVec.txt'),'rb',CODING));
+    
+    vectorizer=pickle.load(open(join(DICT_DIR,'vectorizer.pkl'), 'rb'));
+    clf=pickle.load(open(join(DICT_DIR,'svm.pkl'), 'rb'));
+
+#执行所有的步骤
+def init_without_dict():
+#     logging.debug((u"已从原始数据提取正常信息 %d 垃圾信息%d"%(normalsize,spamsize)).encode(CODING))
+    global messageVec,messageLabels;
+    
+    normalfilelist=[join(NORMAL_DIR,doc) for doc in os.listdir(NORMAL_DIR)];
+    spamfilelist=[join(SPAM_DIR,doc) for doc in os.listdir(SPAM_DIR)];
+    allFileList=normalfilelist+spamfilelist;
+    
+    #生成messageVec并保存
+    messageVec=skBOWVec(allFileList);
+    saveVec(messageVec,join(DICT_DIR,'messageVec.txt'));
+    
+    #生成messageLabels并保存
+    normalLength=calLength(normalfilelist);
+    messageLabels=[0 for i in range(len(normalLength))]+[1 for j in range(normalLength,len(messageVec))];
+    pickle.dump(messageLabels, codecs.open(join(DICT_DIR,'a.txt'), 'wb',CODING));
+    
+#     normalVec=skBOWVec(normalfilelist);
+#     saveVec(normalVec,'normalVec.txt');
+#     spamVec=skBOWVec(spamfilelist);
+#     saveVec(spamVec,'spamVec.txt');
+#     messageVec,messageLabels=catVec(normalVec,spamVec);
+    
+    #训练SVM，时间会很久
+#     svmTrain(messageVec,messageLabels);
+
+#spamlinedict,暂时未用到    
+#     json.dump(spamlinedict,codecs.open(join(DICT_DIR,'spamlinedict.json'),'w',CODING),indent=4)
+#     logging.debug((u"分词获得正常词条 %d 垃圾词条%d"%(normaldictsize,spamdictsize)).encode(CODING))
+#     spamlinedictfile=codecs.open(join(DICT_DIR,'spamlinedict.txt'),'w',CODING)
+#     for word,count in spamlinedict.iteritems():
+#         spamlinedictfile.write("%s %d\n"%(word,count))
+#     spamlinedictfile.close()
+    
+    #更新dicts的时间戳，保证data未改变时dicts在ls --sort=time输出中排在data之前
+#     os.popen('touch dicts')
+
+#检查上一次分词统计后数据是否更新过
+#判断data目录和dict目录哪一个比较新
+def checkupdate():
+    updatelist=os.popen('ls -l --sort=time').read()
+    dataidx=updatelist.find('records')
+#     dataidx=updatelist.find('records')
+    dictidx=updatelist.find('dicts')
+    return dataidx<dictidx
+    
+def init():
+    jieba.load_userdict('../split/dictadd.txt')
+    if checkupdate():
+        init_without_dict()
+    else:
+        init_with_dict()
+    
+if __name__=='__main__':
+    init_without_dict()
+    #purify()
+#     init()
+    test()
