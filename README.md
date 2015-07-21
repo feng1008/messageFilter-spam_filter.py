@@ -3,4 +3,4 @@ spam message filter
 
 spam_filter: naive bayes method
 
-spam_filter_SVm: bag-of-words with SVm method
+spam_filter_SVm: bag-of-words with SVM method
